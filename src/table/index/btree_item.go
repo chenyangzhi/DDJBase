@@ -3,12 +3,10 @@ package index
 import (
 	"common"
 	"encoding/binary"
-	"unsafe"
-	logger "until/xlog4go"
 )
 
 type BtreeNodeItem struct {
-	Key     []byte
+	Key     uint64
 	IdxId   uint64
 	KeyType byte
 }
@@ -16,14 +14,10 @@ type BtreeNodeItem struct {
 func(item BtreeNodeItem) GetBtreeNodeItemID() uint64{
 	return item.IdxId
 }
-func(item BtreeNodeItem) GetBtreeNodeItemKey() []byte{
+func(item BtreeNodeItem) GetBtreeNodeItemKey() uint64{
 	return item.Key
 }
-func NewBtreeNodeItem(key []byte, idxId uint64, keyType byte) *BtreeNodeItem {
-	if len(key) > MAXKEYSIZE {
-		logger.Warn("the max Key size is 128 byte")
-		return nil
-	}
+func NewBtreeNodeItem(key,idxId uint64, keyType byte) *BtreeNodeItem {
 	return &BtreeNodeItem{
 		Key:     key,
 		IdxId:   idxId,
@@ -32,23 +26,13 @@ func NewBtreeNodeItem(key []byte, idxId uint64, keyType byte) *BtreeNodeItem {
 }
 
 func (item BtreeNodeItem) Size() uint16 {
-	return uint16(len(item.Key) + common.INT64_LEN + common.INT8_LEN)
-}
-
-func (item BtreeNodeItem) KeyLength() uint16 {
-	return uint16(len(item.Key))
+	return common.INT64_LEN + common.INT64_LEN + common.INT8_LEN
 }
 
 func (item BtreeNodeItem) ToBytes(bytes []byte) int32 {
-	length := item.KeyLength()
-	_assert(len(bytes) >= int(item.Size()), "the BtreeNodeItem to bytes's bytes is too small")
 	iStart, iEnd := 0, 0
-	iEnd = iStart + common.INT16_LEN
-	binary.LittleEndian.PutUint16(bytes[iStart:iEnd], length)
-	keyLen := len(item.Key)
-	iStart = iEnd
-	iEnd = iStart + keyLen
-	copy(bytes[iStart:iEnd], item.Key)
+	iEnd = iStart + common.INT64_LEN
+	binary.LittleEndian.PutUint64(bytes[iStart:iEnd], item.Key)
 	iStart = iEnd
 	iEnd = iStart + common.INT64_LEN
 	binary.LittleEndian.PutUint64(bytes[iStart:iEnd], item.IdxId)
@@ -69,11 +53,8 @@ func BytesToBtreeNodeItems(barr []byte, count uint16) []*BtreeNodeItem {
 	for i := uint16(0); i < count; i++ {
 		b := new(BtreeNodeItem)
 		iStart = iEnd
-		iEnd = iStart + common.INT16_LEN
-		length := binary.LittleEndian.Uint16(barr[iStart:iEnd])
-		iStart = iEnd
-		iEnd = iStart + uint32(length)
-		b.Key = barr[iStart:iEnd]
+		iEnd = iStart + common.INT64_LEN
+		b.Key = binary.LittleEndian.Uint64(barr[iStart:iEnd])
 		iStart = iEnd
 		iEnd = iStart + common.INT64_LEN
 		b.IdxId = binary.LittleEndian.Uint64(barr[iStart:iEnd])

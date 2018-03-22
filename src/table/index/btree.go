@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"until"
+	"container/list"
 )
 
 type Item interface {
@@ -57,7 +58,7 @@ func New(degree int, path string) *BTree {
 	return NewWithFreeList(degree, NewFreeList(DefaultFreeListSize), path)
 }
 
-func RemoveFromLruCache(k uint64,cow *copyOnWriteContext){
+func RemoveFromLruCache(k uint32,cow *copyOnWriteContext){
 	node := cow.nodeIdMap[k]
 	if len(node.children) != 0 {
 		return
@@ -69,7 +70,10 @@ func RemoveFromLruCache(k uint64,cow *copyOnWriteContext){
 	cow.freeNode(node)
 }
 
-func AddToLruCache(k uint64,cow *copyOnWriteContext){
+func AddToLruCache(k uint32,cow *copyOnWriteContext){
+	if true {
+		return
+	}
 	lru := cow.cache
 	node := cow.nodeIdMap[k]
 	if len(node.children) != 0 {
@@ -78,7 +82,7 @@ func AddToLruCache(k uint64,cow *copyOnWriteContext){
 	if lru.Len() == 50 {
 		for i := 0 ; i < 25 ; i++ {
 			k,_,_ :=lru.RemoveOldest()
-			RemoveFromLruCache(k,cow)
+			RemoveFromLruCache(k.(uint32),cow)
 		}
 	}else{
 		lru.Add(k,nil)
@@ -100,7 +104,7 @@ func NewWithFreeList(degree int, f *FreeList, path string) *BTree {
 	cow.emptyList = cow.mtPage.GetEmptyList()
 	cow.NewPage = make(common.Set)
 	cow.freelist = f
-	cow.cache ,_ = until.New(50)
+	cow.cache ,_ = until.NewLRU(50,nil)
 	return &BTree{
 		degree: degree,
 		cow:    &cow,
@@ -199,7 +203,7 @@ type node struct {
 }
 
 func (n *node) getReadableChild(i int) *node {
-	if n.children[i].childNode == nil || n.children[i].childNode.items == 0{
+	if n.children[i].childNode == nil || len(n.children[i].childNode.items) == 0{
 		n.children[i].childNode = GetBTreeNodeById(n.children[i].childNodeId, n.cow)
 		return n.children[i].childNode
 	}
@@ -207,7 +211,7 @@ func (n *node) getReadableChild(i int) *node {
 }
 
 func (n *node) split(i int) (Item, *node) {
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	item := n.items[i]
 	next := n.cow.newNode()
 	next.items = append(next.items, n.items[i+1:]...)
@@ -220,7 +224,7 @@ func (n *node) split(i int) (Item, *node) {
 }
 
 func (n *node) maybeSplitChild(i, maxItems int) bool {
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	if len(n.getReadableChild(i).items) < maxItems {
 		return false
 	}
@@ -236,7 +240,7 @@ func (n *node) maybeSplitChild(i, maxItems int) bool {
 
 func (n *node) insert(item Item, maxItems int) Item {
 	i, found := n.items.find(item)
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	if found {
 		out := n.items[i]
 		n.items[i] = item
@@ -263,7 +267,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 }
 
 func (n *node) get(key Item) Item {
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	i, found := n.items.find(key)
 	if found {
 		return n.items[i]
@@ -310,7 +314,7 @@ const (
 func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 	var i int
 	var found bool
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	switch typ {
 	case removeMax:
 		if len(n.children) == 0 {
@@ -349,7 +353,7 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 	return child.remove(item, minItems, typ)
 }
 func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) Item {
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	if i > 0 && len(n.getReadableChild(i).items) > minItems {
 		child := n.getReadableChild(i)
 		stealFrom := n.getReadableChild(i - 1)
@@ -400,7 +404,7 @@ const (
 
 func (n *node) iterate(dir direction, start, stop Item, includeStart bool, hit bool, iter ItemIterator) (bool, bool) {
 	var ok bool
-	AddToLruCache(node.nodeId,node.cow)
+	AddToLruCache(n.nodeId,n.cow)
 	switch dir {
 	case ascend:
 		for i := 0; i < len(n.items); i++ {
@@ -480,6 +484,7 @@ type BTree struct {
 type copyOnWriteContext struct {
 	freelist  *FreeList
 	f         *os.File
+	dataFile  *os.File
 	emptyList []uint32
 	NewPage   common.Set
 	mmapmap   map[uint32]mmap.MMap
@@ -487,7 +492,8 @@ type copyOnWriteContext struct {
 	mtPage    *MetaPage
 	metaMmap  mmap.MMap
 	dirtyPage common.Set
-	cache     until.LRU
+	cache     *until.LRU
+	vPool     *ValuePool
 }
 
 func (t *BTree) Clone() (t2 *BTree) {
@@ -527,6 +533,42 @@ func (c *copyOnWriteContext) freeNode(n *node) {
 		c.freelist.freeNode(n)
 		delete(c.nodeIdMap, n.nodeId)
 	}
+}
+
+func (tr *BTree) Insert(key uint64,value []byte) *BtreeNodeItem{
+	offset := tr.cow.vPool.CurrentOffest
+	fileOffset := tr.cow.vPool.EofOffset
+	bItem := NewBtreeNodeItem(offset,key,1)
+	bItem.Key = fileOffset + offset
+	result := tr.ReplaceOrInsert(bItem)
+	iv := NewInternalValue(false,uint32(len(value)),key,value)
+	bv := iv.ToBytes()
+	lv := len(bv)
+	currentOffset := offset + uint64(lv)
+	if currentOffset < MAXPOOLSIZE {
+		copy(tr.cow.vPool.MemeryTail[offset:currentOffset], bv)
+		tr.cow.vPool.CurrentOffest = currentOffset
+	}else{
+		WriteAt(fileOffset,tr.cow.vPool.MemeryTail[0:offset],tr.cow.dataFile)
+		tr.cow.vPool.EofOffset = fileOffset + offset
+		tr.cow.vPool.CurrentOffest = 0
+		aList := tr.cow.vPool.RemoveValues
+		for e := aList.Front(); e != nil; e = e.Next() {
+			off := e.Value.(uint64)
+			WriteAt(off,[]byte{1},tr.cow.dataFile)
+		}
+		tr.cow.vPool.MemeryTail = make([]byte,MAXPOOLSIZE)
+		tr.cow.vPool.RemoveValues = list.New()
+		currentOffset = uint64(lv)
+		copy(tr.cow.vPool.MemeryTail[0:currentOffset], bv)
+		tr.cow.vPool.CurrentOffest = currentOffset
+	}
+	if result != nil {
+		removeOffset := result.(*BtreeNodeItem).Key
+		tr.cow.vPool.RemoveValues.PushBack(removeOffset)
+		return result.(*BtreeNodeItem)
+	}
+	return nil
 }
 
 func (t *BTree) ReplaceOrInsert(item Item) Item {
@@ -602,11 +644,35 @@ func (t *BTree) AscendLessThan(pivot Item, iterator ItemIterator) {
 	t.root.iterate(ascend, nil, pivot, false, false, iterator)
 }
 
-func (t *BTree) AscendGreaterOrEqual(pivot Item, iterator ItemIterator) {
+func AscendGreaterOrEqual(b BtreeNodeItem,tr *BTree,includeStart bool) *list.List{
+	got := list.New()
+	offs := make([]uint64,100)
+	count := 0
+	tr.AscendGreaterOrEqual(b, func(a Item) bool {
+		offs[count] = a.(*BtreeNodeItem).Key
+		count++
+		if count >= 100 {
+			result := BatchReadAt(offs,tr.cow)
+			for _,r := range result{
+				got.PushBack(r)
+			}
+			count = 0
+			return false
+		}
+		return true
+	},includeStart)
+	result := BatchReadAt(offs[0:count],tr.cow)
+	for _,r := range result{
+		got.PushBack(r)
+	}
+	return got
+}
+
+func (t *BTree) AscendGreaterOrEqual(pivot Item, iterator ItemIterator,includeStart bool) {
 	if t.root == nil {
 		return
 	}
-	t.root.iterate(ascend, pivot, nil, false, false, iterator)
+	t.root.iterate(ascend, pivot, nil, includeStart, false, iterator)
 }
 
 func (t *BTree) Ascend(iterator ItemIterator) {
@@ -642,6 +708,20 @@ func (t *BTree) Descend(iterator ItemIterator) {
 		return
 	}
 	t.root.iterate(descend, nil, nil, false, false, iterator)
+}
+
+func (tr *BTree) GetByKey(key uint64) []byte{
+	var b BtreeNodeItem
+	b.IdxId = key
+	item := tr.Get(&b)
+	if item != nil {
+		bItem := (tr.Get(&b)).(*BtreeNodeItem)
+		offset := bItem.GetBtreeNodeItemKey()
+		iv := ReadAt(offset,tr.cow)
+		v := iv.Value
+		return v
+	}
+	return nil
 }
 
 func (t *BTree) Get(key Item) Item {
@@ -706,5 +786,16 @@ func (tr BTree) Commit() {
 		page.WriteToMMapRegion(tr.cow)
 	}
 	tr.cow.dirtyPage = make(common.Set)
+	offset := tr.cow.vPool.CurrentOffest
+	WriteAt(tr.cow.vPool.EofOffset,tr.cow.vPool.MemeryTail[0:offset],tr.cow.dataFile)
+	tr.cow.vPool.EofOffset = tr.cow.vPool.EofOffset + offset
+	tr.cow.vPool.CurrentOffest = 0
+	tr.cow.vPool.MemeryTail = make([]byte,MAXPOOLSIZE)
+	aList := tr.cow.vPool.RemoveValues
+	for e := aList.Front(); e != nil; e = e.Next() {
+		off := e.Value.(uint64)
+		WriteAt(off,[]byte{1},tr.cow.dataFile)
+	}
+	tr.cow.vPool.RemoveValues = list.New()
 }
 

@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	size    = flag.Int("size", 100, "size of the tree to build")
+	size    = flag.Int("size", 300, "size of the tree to build")
 	logconf = flag.String("l", "./conf/log.json", "log config file path")
 )
 
@@ -39,14 +39,15 @@ func memery() {
 type Iterator func() (value *list.Element, err error)
 func NewClosureIterator(b index.BtreeNodeItem,tr *index.BTree) Iterator{
 	l := list.New()
-	fmt.Println("the l length is ",l.Len())
 	var current *list.Element = l.Front()
 	var r *list.Element
 	markItem := b
+	first := true
 	fn := func() (value *list.Element,err error) {
 		r = current
 		if r == nil {
-			l = AscendGreaterOrEqual(markItem,tr)
+			l = index.AscendGreaterOrEqual(markItem,tr,first)
+			first = false
 			current = l.Front()
 			r =  current
 			length := l.Len()
@@ -54,22 +55,12 @@ func NewClosureIterator(b index.BtreeNodeItem,tr *index.BTree) Iterator{
 				return nil, errors.New("StopIteration")
 			}
 		}
-		markItem = *(current.Value.(*index.BtreeNodeItem))
+		idx := current.Value.(*index.InternalValue).Key
+		markItem.IdxId = idx
 		current = current.Next()
 		return r, nil
 	}
 	return fn
-}
-func AscendGreaterOrEqual(b index.BtreeNodeItem,tr *index.BTree) *list.List{
-	got := list.New()
-	tr.AscendGreaterOrEqual(b, func(a index.Item) bool {
-		got.PushBack(a)
-		if got.Len() >= 100 {
-			return false
-		}
-		return true
-	})
-	return got
 }
 
 func find(key uint64,tr *index.BTree) Iterator {
@@ -94,29 +85,19 @@ func main() {
 	defer logger.Close()
 	go memery()
 	table := index.NewTable("/home/chenyangzhi/workplace/client_server/data", "test", "test", "primaryKey")
-	table.CreateTable()
+	f := table.CreateTable()
 	//vals := rand.Perm(*size)
 	vals := GetIncreasedArray(*size)
-	tr := index.BuildBTreeFromPage(table.GetTablePath())
+	tr := index.BuildBTreeFromPage(table.GetTablePath(),f)
 	t := time.Now()
-	//for _, v := range vals {
-	//	var b index.BtreeNodeItem
-	//	bs := make([]byte,8,8)
-	//	b.IdxId = uint64(v)
-	//	binary.LittleEndian.PutUint64(bs, uint64(b.IdxId))
-	//	b.Key = bs
-	//	if b.IdxId == 178 {
-	//		tr.ReplaceOrInsert(&b)
-	//	}else{
-	//		tr.ReplaceOrInsert(&b)
-	//	}
-	//	item := tr.Get(&b)
-	//	if item == nil {
-	//		fmt.Println("error: not insert val = ", v)
-	//	}
-	//}
-	//elapsed := time.Since(t)
-	//fmt.Println("the time elapsed ", elapsed)
+	for _, v := range vals {
+		bs := make([]byte,8)
+		binary.LittleEndian.PutUint64(bs,uint64(v))
+		tr.Insert(uint64(v),bs)
+	}
+
+	elapsed := time.Since(t)
+	fmt.Println("the time elapsed ", elapsed)
 	//t = time.Now()
 	next := find(uint64(64),tr)
 	for {
@@ -124,33 +105,31 @@ func main() {
 		if err != nil {
 			break
 		}
-		val := v.Value.(*index.BtreeNodeItem).IdxId
-		fmt.Println(val)
+		val := binary.LittleEndian.Uint64(v.Value.(*index.InternalValue).Value)
+		fmt.Println("the value is ",val)
 	}
+	elapsed = time.Since(t)
+	fmt.Println("the time elapsed ", elapsed)
 	count := 0
 	for _, v := range vals {
-		var b index.BtreeNodeItem
-		b.IdxId = uint64(v)
-		bs := make([]byte, 8, 8)
-		binary.LittleEndian.PutUint64(bs, uint64(b.IdxId))
-		b.Key = bs
-		item := (tr.Get(&b)).(*index.BtreeNodeItem)
-		//fmt.Println("the key is ",item.GetBtreeNodeItemID(), " the value is",binary.LittleEndian.Uint64(item.GetBtreeNodeItemKey()))
-		if item == nil {
+		val := tr.GetByKey(uint64(v))
+		vv := binary.LittleEndian.Uint64(val)
+		if val != nil {
+			if vv == 99 {
+				fmt.Println("the key is ", v, " the value is", vv)
+			}
+		} else {
 			count++
 			fmt.Println("error: not found val = ", v)
 		}
 	}
-	elapsed := time.Since(t)
+	elapsed = time.Since(t)
+	fmt.Println("the time elapsed ", elapsed)
 	//root := tr.GetRootNode()
 	//root.Print(os.Stdout, 2)
 	fmt.Println("the not fount count is ", count)
 	fmt.Println("the time elapsed ", elapsed)
-	fmt.Println("the tree all of node id ", tr.GetNodeIds())
-	set := tr.GetDirtyPage()
-	fmt.Println("the dirty page is %v ", set)
 	tr.Commit()
-	fmt.Println("the dirty page is commit")
 	os.Exit(0)
 
 }

@@ -48,3 +48,11 @@ func WriteFile(fileName string, b []byte) {
 		panic(err)
 	}
 }
+
+func CreateDataFile(filePath string)*os.File{
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return f
+}

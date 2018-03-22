@@ -5,6 +5,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 	//logger "until/xlog4go"
 	"fmt"
+	"os"
 )
 
 const (
@@ -129,8 +130,11 @@ func (n node) NodeToPage() *BtreeNodePage {
 	return NewBreeNodePage(ph, bi)
 }
 
-func BuildBTreeFromPage(baseTableColumn string) *BTree {
+func BuildBTreeFromPage(baseTableColumn string,f *os.File) *BTree {
 	tr := New(DEGREE, baseTableColumn)
+	tr.cow.dataFile = f
+	eof := GetFileOffset(tr.cow.dataFile)
+	tr.cow.vPool = NewValuePool(eof)
 	rootId := tr.cow.mtPage.RootId
 	if rootId == INITROOTNULL {
 		return tr

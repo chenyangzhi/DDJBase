@@ -28,11 +28,17 @@ func (table Table) GetTablePath() string {
 	return fmt.Sprintf("%v/%v/%v/%v", table.basePath, table.dataBase, table.table, table.columnName)
 }
 
-func (table Table) CreateTable() {
+func (table Table) GetTableDataPath() string {
+	return fmt.Sprintf("%v/%v/%v/%v", table.basePath, table.dataBase, table.table, "data")
+}
+
+func (table Table) CreateTable() *os.File {
 	path := table.GetTablePath()
+	dataPath := table.GetTableDataPath()
+	dataFile := iowrapper.CreateDataFile(dataPath)
 	os.MkdirAll(filepath.Base(path), os.ModePerm)
 	if iowrapper.PathExist(path) {
-		return
+		return dataFile
 	}
 	common.Check(iowrapper.CreateSparseFile(path, 4096*1000000))
 	f, err := os.OpenFile(path, os.O_RDWR, 0666)
@@ -44,4 +50,5 @@ func (table Table) CreateTable() {
 	mapregion.Flush()
 	mapregion.Unmap()
 	f.Close()
+	return dataFile
 }
