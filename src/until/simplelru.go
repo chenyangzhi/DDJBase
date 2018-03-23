@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"errors"
 )
+
 // LRUCache is the interface for simple LRU cache.
 type LRUCache interface {
 	// Adds a value to the cache, returns true if an eviction occurred and
@@ -38,6 +39,7 @@ type LRUCache interface {
 	// Clear all cache entries
 	Purge()
 }
+
 // EvictCallback is used to get a callback when a cache entry is evicted
 type EvictCallback func(key interface{}, value interface{})
 

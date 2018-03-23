@@ -6,6 +6,7 @@ import (
 	//logger "until/xlog4go"
 	"fmt"
 	"os"
+	"container/list"
 )
 
 const (
@@ -116,7 +117,7 @@ func (n node) NodeToPage() *BtreeNodePage {
 	childLength := uint16(len(n.children))
 	childrenId := make([]uint32, childLength, childLength)
 	if childLength == 123 {
-		fmt.Println("the childLength is",childLength)
+		fmt.Println("the childLength is", childLength)
 	}
 	for i, id := range n.children {
 		childrenId[i] = id.childNodeId
@@ -130,11 +131,17 @@ func (n node) NodeToPage() *BtreeNodePage {
 	return NewBreeNodePage(ph, bi)
 }
 
-func BuildBTreeFromPage(baseTableColumn string,f *os.File) *BTree {
+func BuildBTreeFromPage(baseTableColumn string, f *os.File) *BTree {
 	tr := New(DEGREE, baseTableColumn)
 	tr.cow.dataFile = f
+	tr.cow.emptyQueue = InitValuePoolQueue(MEMQUEUESIZE)
+	tr.cow.fullQueue = list.New()
+	tr.cow.flushQueue = list.New()
+	tr.cow.flushFinish = true
 	eof := GetFileOffset(tr.cow.dataFile)
-	tr.cow.vPool = NewValuePool(eof)
+	tr.cow.curVPool = <- tr.cow.emptyQueue
+	tr.cow.curVPool.EofOffset = eof
+	tr.cow.curFileOffset = eof
 	rootId := tr.cow.mtPage.RootId
 	if rootId == INITROOTNULL {
 		return tr

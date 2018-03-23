@@ -1,64 +1,79 @@
 package index
+
 import (
-	"os"
-	"log"
 	"common"
-	"encoding/binary"
-	"sort"
 	"container/list"
+	"encoding/binary"
+	"log"
+	"os"
+	"sort"
+	"sync"
 )
 
-const(
-	MAXPOOLSIZE = 24
+const (
+	MAXPOOLSIZE = 1024*1024*2
+	MEMQUEUESIZE = 10
 )
+
 type ValuePool struct {
-	EofOffset        uint64
-	CurrentOffest    uint64
-	RemoveValues    *list.List
-	MemeryTail      []byte
+	EofOffset     uint64
+	CurrentOffest uint64
+	RemoveValues  *list.List
+	MemeryTail    []byte
+	MtMutex       *sync.Mutex
 }
 
-func NewValuePool(eof uint64) *ValuePool{
+func InitValuePoolQueue(size int)chan *ValuePool{
+	c := make(chan *ValuePool,size)
+	for i := 0; i < size; i++ {
+		vp := NewValuePool(0)
+		c <- vp
+	}
+	return c
+}
+
+func NewValuePool(eof uint64) *ValuePool {
 	rlist := list.New()
-	b := make([]byte,MAXPOOLSIZE)
+	b := make([]byte, MAXPOOLSIZE)
 	return &ValuePool{
-		EofOffset: eof,
+		EofOffset:     eof,
 		CurrentOffest: 0,
-		RemoveValues: rlist,
-		MemeryTail:   b,
+		RemoveValues:  rlist,
+		MemeryTail:    b,
+		MtMutex: new(sync.Mutex),
 	}
 }
 
 type InternalValue struct {
-	IsRemove  bool
-	Length    uint32
-	Key       uint64
-	Value     []byte
+	IsRemove bool
+	Length   uint32
+	Key      uint64
+	Value    []byte
 }
 
 func (iv1 InternalValue) Less(iv2 InternalValue) bool {
 	return iv1.Key < iv2.Key
 }
-func NewInternalValue(isRemove bool,length uint32, key uint64, val []byte) *InternalValue{
+func NewInternalValue(isRemove bool, length uint32, key uint64, val []byte) *InternalValue {
 	return &InternalValue{
-		IsRemove:  isRemove,
-		Length:    length,
-		Key:       key,
-		Value:     val,
+		IsRemove: isRemove,
+		Length:   length,
+		Key:      key,
+		Value:    val,
 	}
 
 }
 
-func (iv InternalValue) Size() uint32{
+func (iv InternalValue) Size() uint32 {
 	return uint32(common.INT8_LEN + common.INT64_LEN + common.INT32_LEN + len(iv.Value))
 }
 
-func(iv InternalValue) ToBytes()[]byte{
-	b := make([]byte,iv.Size() + CRCSIZE)
+func (iv InternalValue) ToBytes() []byte {
+	b := make([]byte, iv.Size()+CRCSIZE)
 	iStart, iEnd := 0, 0
-	if iv.IsRemove == true{
+	if iv.IsRemove == true {
 		b[iStart] = 1
-	}else{
+	} else {
 		b[iStart] = 0
 	}
 	iStart += common.INT8_LEN
@@ -69,7 +84,7 @@ func(iv InternalValue) ToBytes()[]byte{
 	binary.LittleEndian.PutUint64(b[iStart:iEnd], iv.Key)
 	iStart = iEnd
 	iEnd = iStart + len(iv.Value)
-	copy(b[iStart:iEnd],iv.Value)
+	copy(b[iStart:iEnd], iv.Value)
 	crc := common.Crc16(b[0:iEnd])
 	iStart = iEnd
 	iEnd = iStart + CRCSIZE
@@ -77,8 +92,8 @@ func(iv InternalValue) ToBytes()[]byte{
 	return b
 }
 
-func BytesToInternalValue(b []byte) *InternalValue{
-	iStart , iEnd := 0, 0
+func BytesToInternalValue(b []byte) *InternalValue {
+	iStart, iEnd := 0, 0
 	remove := false
 	if b[0] != 0 {
 		remove = true
@@ -89,94 +104,145 @@ func BytesToInternalValue(b []byte) *InternalValue{
 	iStart = iEnd
 	iEnd = iStart + common.INT64_LEN
 	key := binary.LittleEndian.Uint64(b[iStart:iEnd])
-	value := make([]byte,length)
-	if remove == true{
-		return NewInternalValue(true,0,key,[]byte{})
+	value := make([]byte, length)
+	if remove == true {
+		return NewInternalValue(true, 0, key, []byte{})
 	}
 	iStart = iEnd
 	iEnd = iStart + int(length)
-	copy(value,b[iStart:iEnd])
+	copy(value, b[iStart:iEnd])
 	crc_0 := common.Crc16(b[0:iEnd])
 	iStart = iEnd
 	iEnd = iStart + common.INT16_LEN
 	crc_1 := binary.LittleEndian.Uint16(b[iStart:iEnd])
 	_assert(crc_0 == crc_1, "the InternalValue crc is failed")
-	return NewInternalValue(false,length,key,value)
+	return NewInternalValue(false, length, key, value)
 }
 
-func GetFileOffset(f *os.File) uint64{
+func GetFileOffset(f *os.File) uint64 {
 	currentPosition, _ := f.Seek(0, 2)
 	return uint64(currentPosition)
 }
 
-func WriteAt(whence uint64,w []byte,f *os.File){
-	if _,err :=f.WriteAt(w,int64(whence)); err != nil {
+func WriteAt(whence uint64, w []byte, f *os.File) {
+	if _, err := f.WriteAt(w, int64(whence)); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func ReadAt(offset uint64,cow *copyOnWriteContext)*InternalValue{
-	if offset >= cow.vPool.EofOffset {
-		return MemReadAt(offset,cow)
-	}else{
-		return FileReadAt(offset,cow.dataFile)
+func ReadAt(offset uint64, cow *copyOnWriteContext) *InternalValue {
+	if offset >= cow.curFileOffset {
+		return MemReadAt(offset, cow)
+	} else {
+		return FileReadAt(offset, cow.dataFile)
 	}
 }
 
-func BatchReadAt(offsets []uint64,cow *copyOnWriteContext) []*InternalValue{
+func BatchReadAt(offsets []uint64, cow *copyOnWriteContext) []*InternalValue {
 	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
-	memOffset := make([]uint64,0,2)
-	fileOffset := make([]uint64,0,2)
-	values := make([]*InternalValue,0,2)
-	for _,off := range offsets{
-		if off >= cow.vPool.EofOffset {
-			memOffset = append(memOffset,off)
-		}else{
-			fileOffset = append(fileOffset,off)
+	memOffset := make([]uint64, 0, 2)
+	fileOffset := make([]uint64, 0, 2)
+	values := make([]*InternalValue, 0, 2)
+	for _, off := range offsets {
+		if off >= cow.curVPool.EofOffset {
+			memOffset = append(memOffset, off)
+		} else {
+			fileOffset = append(fileOffset, off)
 		}
 	}
-	v1 := BatchMemReadAt(memOffset,cow)
-	v2 := BatchFileReadAt(fileOffset,cow.dataFile)
-	values = append(values,v1...)
-	values = append(values,v2...)
+	v1 := BatchMemReadAt(memOffset, cow)
+	v2 := BatchFileReadAt(fileOffset, cow.dataFile)
+	values = append(values, v1...)
+	values = append(values, v2...)
 	sort.Slice(values, func(i, j int) bool { return values[i].Key < values[j].Key })
 	return values
 }
-func MemReadAt(off uint64,cow *copyOnWriteContext) *InternalValue{
-	relativeOff := off - cow.vPool.EofOffset
-	length := binary.LittleEndian.Uint32(cow.vPool.MemeryTail[relativeOff+1:relativeOff + 5])
+
+func ValuePoolReadAt(vPool *ValuePool,off uint64)*InternalValue{
+	vPool.MtMutex.Lock()
+	if off < vPool.EofOffset || off >= vPool.EofOffset + vPool.CurrentOffest {
+		vPool.MtMutex.Unlock()
+		return nil
+	}
+	relativeOff := off - vPool.EofOffset
+	length := binary.LittleEndian.Uint32(vPool.MemeryTail[relativeOff+1 : relativeOff+5])
 	iLen := length + common.INT8_LEN + common.INT64_LEN + common.INT32_LEN + CRCSIZE
 	bs := make([]byte,iLen)
-	copy(bs,cow.vPool.MemeryTail[relativeOff: relativeOff + uint64(iLen)])
+	copy(bs, vPool.MemeryTail[relativeOff:relativeOff+uint64(iLen)])
+	vPool.MtMutex.Unlock()
 	return BytesToInternalValue(bs)
 }
-func BatchMemReadAt(offsets []uint64,cow *copyOnWriteContext) []*InternalValue{
-	values := make([]*InternalValue,len(offsets))
-	for i,off := range offsets{
-		iv := MemReadAt(off,cow)
+
+func MemReadAt(off uint64, cow *copyOnWriteContext) *InternalValue {
+	cur := cow.curVPool
+	iv := ValuePoolReadAt(cur,off)
+	if iv != nil {
+		return iv
+	}
+	l := cow.fullQueue
+	for e := l.Front(); e != nil; e = e.Next() {
+		iv = ValuePoolReadAt(e.Value.(*ValuePool),off)
+		if iv != nil {
+			return iv
+		}
+	}
+	l = cow.flushQueue
+	for e := l.Front(); e != nil; e = e.Next() {
+		iv = ValuePoolReadAt(e.Value.(*ValuePool),off)
+		if iv != nil {
+			return iv
+		}
+	}
+	return iv
+}
+func BatchMemReadAt(offsets []uint64, cow *copyOnWriteContext) []*InternalValue {
+	values := make([]*InternalValue, len(offsets))
+	for i, off := range offsets {
+		iv := MemReadAt(off, cow)
 		values[i] = iv
 	}
 	return values
 }
 
-func FileReadAt(off uint64,f *os.File)*InternalValue{
-	lbyte := make([]byte,common.INT32_LEN)
-	if _,err := f.ReadAt(lbyte,int64(off) + int64(common.INT8_LEN)); err != nil{
+func FileReadAt(off uint64, f *os.File) *InternalValue {
+	lbyte := make([]byte, common.INT32_LEN)
+	if _, err := f.ReadAt(lbyte, int64(off)+int64(common.INT8_LEN)); err != nil {
 		log.Fatal(err)
 	}
 	length := binary.LittleEndian.Uint32(lbyte)
-	bs := make([]byte,length + common.INT8_LEN + common.INT64_LEN + common.INT32_LEN + CRCSIZE)
-	if _,err := f.ReadAt(bs,int64(off)); err != nil{
+	bs := make([]byte, length+common.INT8_LEN+common.INT64_LEN+common.INT32_LEN+CRCSIZE)
+	if _, err := f.ReadAt(bs, int64(off)); err != nil {
 		log.Fatal(err)
 	}
 	return BytesToInternalValue(bs)
 }
 
-func BatchFileReadAt(offsets []uint64,f *os.File) []*InternalValue{
-	values := make([]*InternalValue,len(offsets))
-	for i,off := range offsets{
-		iv := FileReadAt(off,f)
+func BatchFileReadAt(offsets []uint64, f *os.File) []*InternalValue {
+	values := make([]*InternalValue, len(offsets))
+	for i, off := range offsets {
+		iv := FileReadAt(off, f)
 		values[i] = iv
 	}
 	return values
+}
+
+func Flush(cow *copyOnWriteContext){
+	var vp *ValuePool
+	for e := cow.flushQueue.Front(); e != nil; e = e.Next() {
+		vp = e.Value.(*ValuePool)
+		WriteAt(vp.EofOffset, vp.MemeryTail[0:vp.CurrentOffest], cow.dataFile)
+		cow.curFileOffset = vp.EofOffset + vp.CurrentOffest
+		vp.CurrentOffest = 0
+		aList := vp.RemoveValues
+		for e := aList.Front(); e != nil; e = e.Next() {
+			off := e.Value.(*BtreeNodeItem).Key
+			WriteAt(off, []byte{1}, cow.dataFile)
+		}
+		vp.RemoveValues = list.New()
+		vp.MtMutex.Lock()
+		cow.emptyQueue <- vp
+		vp.MtMutex.Unlock()
+	}
+	cow.flushQueue = list.New()
+	cow.flushFinish = true
 }

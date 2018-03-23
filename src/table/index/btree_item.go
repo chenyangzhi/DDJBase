@@ -11,13 +11,13 @@ type BtreeNodeItem struct {
 	KeyType byte
 }
 
-func(item BtreeNodeItem) GetBtreeNodeItemID() uint64{
+func (item BtreeNodeItem) GetBtreeNodeItemID() uint64 {
 	return item.IdxId
 }
-func(item BtreeNodeItem) GetBtreeNodeItemKey() uint64{
+func (item BtreeNodeItem) GetBtreeNodeItemKey() uint64 {
 	return item.Key
 }
-func NewBtreeNodeItem(key,idxId uint64, keyType byte) *BtreeNodeItem {
+func NewBtreeNodeItem(key, idxId uint64, keyType byte) *BtreeNodeItem {
 	return &BtreeNodeItem{
 		Key:     key,
 		IdxId:   idxId,

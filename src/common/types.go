@@ -22,7 +22,7 @@ func (set Set) Insert(i uint32) {
 	set[i] = struct{}{}
 }
 func (set Set) Delete(i uint32) {
-	delete(set,i)
+	delete(set, i)
 }
 func (set Set) String() string {
 	str := ""

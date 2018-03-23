@@ -1,6 +1,7 @@
 package until
+
 import (
-        "sync"
+	"sync"
 )
 
 // Cache is a thread-safe fixed size LRU cache.

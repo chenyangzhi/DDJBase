@@ -58,7 +58,7 @@ func New(degree int, path string) *BTree {
 	return NewWithFreeList(degree, NewFreeList(DefaultFreeListSize), path)
 }
 
-func RemoveFromLruCache(k uint32,cow *copyOnWriteContext){
+func RemoveFromLruCache(k uint32, cow *copyOnWriteContext) {
 	node := cow.nodeIdMap[k]
 	if len(node.children) != 0 {
 		return
@@ -70,7 +70,7 @@ func RemoveFromLruCache(k uint32,cow *copyOnWriteContext){
 	cow.freeNode(node)
 }
 
-func AddToLruCache(k uint32,cow *copyOnWriteContext){
+func AddToLruCache(k uint32, cow *copyOnWriteContext) {
 	if true {
 		return
 	}
@@ -80,12 +80,12 @@ func AddToLruCache(k uint32,cow *copyOnWriteContext){
 		return
 	}
 	if lru.Len() == 50 {
-		for i := 0 ; i < 25 ; i++ {
-			k,_,_ :=lru.RemoveOldest()
-			RemoveFromLruCache(k.(uint32),cow)
+		for i := 0; i < 25; i++ {
+			k, _, _ := lru.RemoveOldest()
+			RemoveFromLruCache(k.(uint32), cow)
 		}
-	}else{
-		lru.Add(k,nil)
+	} else {
+		lru.Add(k, nil)
 	}
 }
 
@@ -104,7 +104,7 @@ func NewWithFreeList(degree int, f *FreeList, path string) *BTree {
 	cow.emptyList = cow.mtPage.GetEmptyList()
 	cow.NewPage = make(common.Set)
 	cow.freelist = f
-	cow.cache ,_ = until.NewLRU(50,nil)
+	cow.cache, _ = until.NewLRU(50, nil)
 	return &BTree{
 		degree: degree,
 		cow:    &cow,
@@ -203,7 +203,7 @@ type node struct {
 }
 
 func (n *node) getReadableChild(i int) *node {
-	if n.children[i].childNode == nil || len(n.children[i].childNode.items) == 0{
+	if n.children[i].childNode == nil || len(n.children[i].childNode.items) == 0 {
 		n.children[i].childNode = GetBTreeNodeById(n.children[i].childNodeId, n.cow)
 		return n.children[i].childNode
 	}
@@ -211,7 +211,7 @@ func (n *node) getReadableChild(i int) *node {
 }
 
 func (n *node) split(i int) (Item, *node) {
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	item := n.items[i]
 	next := n.cow.newNode()
 	next.items = append(next.items, n.items[i+1:]...)
@@ -224,7 +224,7 @@ func (n *node) split(i int) (Item, *node) {
 }
 
 func (n *node) maybeSplitChild(i, maxItems int) bool {
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	if len(n.getReadableChild(i).items) < maxItems {
 		return false
 	}
@@ -240,7 +240,7 @@ func (n *node) maybeSplitChild(i, maxItems int) bool {
 
 func (n *node) insert(item Item, maxItems int) Item {
 	i, found := n.items.find(item)
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	if found {
 		out := n.items[i]
 		n.items[i] = item
@@ -267,7 +267,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 }
 
 func (n *node) get(key Item) Item {
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	i, found := n.items.find(key)
 	if found {
 		return n.items[i]
@@ -314,7 +314,7 @@ const (
 func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 	var i int
 	var found bool
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	switch typ {
 	case removeMax:
 		if len(n.children) == 0 {
@@ -353,7 +353,7 @@ func (n *node) remove(item Item, minItems int, typ toRemove) Item {
 	return child.remove(item, minItems, typ)
 }
 func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) Item {
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	if i > 0 && len(n.getReadableChild(i).items) > minItems {
 		child := n.getReadableChild(i)
 		stealFrom := n.getReadableChild(i - 1)
@@ -404,7 +404,7 @@ const (
 
 func (n *node) iterate(dir direction, start, stop Item, includeStart bool, hit bool, iter ItemIterator) (bool, bool) {
 	var ok bool
-	AddToLruCache(n.nodeId,n.cow)
+	AddToLruCache(n.nodeId, n.cow)
 	switch dir {
 	case ascend:
 		for i := 0; i < len(n.items); i++ {
@@ -493,7 +493,12 @@ type copyOnWriteContext struct {
 	metaMmap  mmap.MMap
 	dirtyPage common.Set
 	cache     *until.LRU
-	vPool     *ValuePool
+	curVPool  *ValuePool
+	curFileOffset uint64
+	fullQueue  *list.List
+	flushQueue *list.List
+	flushFinish bool
+	emptyQueue chan *ValuePool
 }
 
 func (t *BTree) Clone() (t2 *BTree) {
@@ -535,37 +540,35 @@ func (c *copyOnWriteContext) freeNode(n *node) {
 	}
 }
 
-func (tr *BTree) Insert(key uint64,value []byte) *BtreeNodeItem{
-	offset := tr.cow.vPool.CurrentOffest
-	fileOffset := tr.cow.vPool.EofOffset
-	bItem := NewBtreeNodeItem(offset,key,1)
+func (tr *BTree) Insert(key uint64, value []byte) *BtreeNodeItem {
+	offset := tr.cow.curVPool.CurrentOffest
+	fileOffset := tr.cow.curVPool.EofOffset
+	bItem := NewBtreeNodeItem(offset, key, 1)
 	bItem.Key = fileOffset + offset
 	result := tr.ReplaceOrInsert(bItem)
-	iv := NewInternalValue(false,uint32(len(value)),key,value)
+	iv := NewInternalValue(false, uint32(len(value)), key, value)
 	bv := iv.ToBytes()
 	lv := len(bv)
 	currentOffset := offset + uint64(lv)
 	if currentOffset < MAXPOOLSIZE {
-		copy(tr.cow.vPool.MemeryTail[offset:currentOffset], bv)
-		tr.cow.vPool.CurrentOffest = currentOffset
-	}else{
-		WriteAt(fileOffset,tr.cow.vPool.MemeryTail[0:offset],tr.cow.dataFile)
-		tr.cow.vPool.EofOffset = fileOffset + offset
-		tr.cow.vPool.CurrentOffest = 0
-		aList := tr.cow.vPool.RemoveValues
-		for e := aList.Front(); e != nil; e = e.Next() {
-			off := e.Value.(uint64)
-			WriteAt(off,[]byte{1},tr.cow.dataFile)
+		copy(tr.cow.curVPool.MemeryTail[offset:currentOffset], bv)
+		tr.cow.curVPool.CurrentOffest = currentOffset
+	} else {
+		tr.cow.fullQueue.PushBack(tr.cow.curVPool)
+		if tr.cow.flushFinish == true && tr.cow.fullQueue.Len() > MEMQUEUESIZE/2 {
+			tr.cow.flushQueue = tr.cow.fullQueue
+			tr.cow.fullQueue = list.New()
+			tr.cow.flushFinish = false
+			go Flush(tr.cow)
 		}
-		tr.cow.vPool.MemeryTail = make([]byte,MAXPOOLSIZE)
-		tr.cow.vPool.RemoveValues = list.New()
+		tr.cow.curVPool = <- tr.cow.emptyQueue
+		tr.cow.curVPool.EofOffset = offset + fileOffset
 		currentOffset = uint64(lv)
-		copy(tr.cow.vPool.MemeryTail[0:currentOffset], bv)
-		tr.cow.vPool.CurrentOffest = currentOffset
+		copy(tr.cow.curVPool.MemeryTail[0:currentOffset], bv)
+		tr.cow.curVPool.CurrentOffest = currentOffset
 	}
 	if result != nil {
-		removeOffset := result.(*BtreeNodeItem).Key
-		tr.cow.vPool.RemoveValues.PushBack(removeOffset)
+		tr.cow.curVPool.RemoveValues.PushBack(result)
 		return result.(*BtreeNodeItem)
 	}
 	return nil
@@ -600,16 +603,34 @@ func (t *BTree) ReplaceOrInsert(item Item) Item {
 	return out
 }
 
-func (t *BTree) Delete(item Item) Item {
-	return t.deleteItem(item, removeItem)
+func (t *BTree) Delete(item Item) []byte {
+	r := t.deleteItem(item, removeItem)
+	t.cow.curVPool.RemoveValues.PushBack(r)
+	if r == nil {
+		return nil
+	}
+	off := r.(*BtreeNodeItem).Key
+	iv := ReadAt(off, t.cow)
+	b := iv.Value
+	return b
 }
 
-func (t *BTree) DeleteMin() Item {
-	return t.deleteItem(nil, removeMin)
+func (t *BTree) DeleteMin() []byte {
+	r := t.deleteItem(nil, removeMin)
+	t.cow.curVPool.RemoveValues.PushBack(r)
+	off := r.(*BtreeNodeItem).Key
+	iv := ReadAt(off, t.cow)
+	b := iv.Value
+	return b
 }
 
-func (t *BTree) DeleteMax() Item {
-	return t.deleteItem(nil, removeMax)
+func (t *BTree) DeleteMax() []byte {
+	r := t.deleteItem(nil, removeMax)
+	t.cow.curVPool.RemoveValues.PushBack(r)
+	off := r.(*BtreeNodeItem).Key
+	iv := ReadAt(off, t.cow)
+	b := iv.Value
+	return b
 }
 
 func (t *BTree) deleteItem(item Item, typ toRemove) Item {
@@ -644,31 +665,24 @@ func (t *BTree) AscendLessThan(pivot Item, iterator ItemIterator) {
 	t.root.iterate(ascend, nil, pivot, false, false, iterator)
 }
 
-func AscendGreaterOrEqual(b BtreeNodeItem,tr *BTree,includeStart bool) *list.List{
-	got := list.New()
-	offs := make([]uint64,100)
+func AscendIterate(b BtreeNodeItem, tr *BTree, includeStart bool) []*InternalValue {
+	offs := make([]uint64, 0, 100)
 	count := 0
+	var result []*InternalValue
 	tr.AscendGreaterOrEqual(b, func(a Item) bool {
-		offs[count] = a.(*BtreeNodeItem).Key
+		offs = append(offs, a.(*BtreeNodeItem).Key)
 		count++
 		if count >= 100 {
-			result := BatchReadAt(offs,tr.cow)
-			for _,r := range result{
-				got.PushBack(r)
-			}
 			count = 0
 			return false
 		}
 		return true
-	},includeStart)
-	result := BatchReadAt(offs[0:count],tr.cow)
-	for _,r := range result{
-		got.PushBack(r)
-	}
-	return got
+	}, includeStart)
+	result = BatchReadAt(offs, tr.cow)
+	return result
 }
 
-func (t *BTree) AscendGreaterOrEqual(pivot Item, iterator ItemIterator,includeStart bool) {
+func (t *BTree) AscendGreaterOrEqual(pivot Item, iterator ItemIterator, includeStart bool) {
 	if t.root == nil {
 		return
 	}
@@ -710,14 +724,14 @@ func (t *BTree) Descend(iterator ItemIterator) {
 	t.root.iterate(descend, nil, nil, false, false, iterator)
 }
 
-func (tr *BTree) GetByKey(key uint64) []byte{
+func (tr *BTree) GetByKey(key uint64) []byte {
 	var b BtreeNodeItem
 	b.IdxId = key
 	item := tr.Get(&b)
 	if item != nil {
 		bItem := (tr.Get(&b)).(*BtreeNodeItem)
 		offset := bItem.GetBtreeNodeItemKey()
-		iv := ReadAt(offset,tr.cow)
+		iv := ReadAt(offset, tr.cow)
 		v := iv.Value
 		return v
 	}
@@ -755,7 +769,7 @@ func (a Int) Less(b Item) bool {
 func (a BtreeNodeItem) Less(b Item) bool {
 	if t, ok := b.(BtreeNodeItem); ok {
 		return a.IdxId < t.IdxId
-	}else{
+	} else {
 		return a.IdxId < b.(*BtreeNodeItem).IdxId
 	}
 }
@@ -774,6 +788,7 @@ func (tr BTree) GetNodeIds() []uint32 {
 	}
 	return arr
 }
+
 func (tr BTree) Commit() {
 	d := tr.cow.dirtyPage
 	tr.cow.mtPage.RootId = tr.root.nodeId
@@ -786,16 +801,11 @@ func (tr BTree) Commit() {
 		page.WriteToMMapRegion(tr.cow)
 	}
 	tr.cow.dirtyPage = make(common.Set)
-	offset := tr.cow.vPool.CurrentOffest
-	WriteAt(tr.cow.vPool.EofOffset,tr.cow.vPool.MemeryTail[0:offset],tr.cow.dataFile)
-	tr.cow.vPool.EofOffset = tr.cow.vPool.EofOffset + offset
-	tr.cow.vPool.CurrentOffest = 0
-	tr.cow.vPool.MemeryTail = make([]byte,MAXPOOLSIZE)
-	aList := tr.cow.vPool.RemoveValues
-	for e := aList.Front(); e != nil; e = e.Next() {
-		off := e.Value.(uint64)
-		WriteAt(off,[]byte{1},tr.cow.dataFile)
-	}
-	tr.cow.vPool.RemoveValues = list.New()
+	fileOffset := tr.cow.curVPool.EofOffset + tr.cow.curVPool.CurrentOffest
+	tr.cow.fullQueue.PushBack(tr.cow.curVPool)
+	tr.cow.flushQueue = tr.cow.fullQueue
+	tr.cow.fullQueue = list.New()
+	Flush(tr.cow)
+	tr.cow.curVPool = <- tr.cow.emptyQueue
+	tr.cow.curVPool.EofOffset = fileOffset
 }
-
