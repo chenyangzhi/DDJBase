@@ -6,8 +6,8 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	pb "kvprobuf"
-	logger "until/xlog4go"
 	"time"
+	logger "until/xlog4go"
 )
 
 const (
@@ -64,7 +64,7 @@ func Put(key uint64, value []byte) {
 		logger.Error("the the error is", err)
 	}
 	elapsed := time.Since(t)
-	logger.Info("the requeset finished in %v",elapsed)
+	logger.Info("the requeset finished in %v", elapsed)
 	return
 }
 
@@ -106,15 +106,15 @@ func main() {
 	}
 	key := uint64(125)
 	t := time.Now()
-	for i:=0; i < 1000000; i++ {
-		if i % 1000 == 0 {
-			logger.Info("%v key is put ",i)
+	for i := 0; i < 1000000; i++ {
+		if i%1000 == 0 {
+			logger.Info("%v key is put ", i)
 		}
 		str := "1234asdfsdfsdfsadfsdfsdfasfddfasdfasdfasdfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafsdfsdfsdfasdfadsfadfadsfadfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafasdffasdf"
 		Put(uint64(i), []byte(str))
 	}
 	elapsed := time.Since(t)
-	logger.Info("Put 100000000 key in DDJkv elapsed %s",elapsed)
+	logger.Info("Put 100000000 key in DDJkv elapsed %s", elapsed)
 	b := Get(key)
 	if len(b) != 0 {
 		logger.Info("Get: the key is %v%s%v", key, " the value is ", string(b))
@@ -123,6 +123,6 @@ func main() {
 	}
 	b = Delete(key)
 	if b != nil {
-		logger.Info("Delete: the key is %v%s%v", key, " the value is ",string(b))
+		logger.Info("Delete: the key is %v%s%v", key, " the value is ", string(b))
 	}
 }

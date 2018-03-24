@@ -4,15 +4,22 @@ import (
 	"common"
 	"container/list"
 	"encoding/binary"
-	"log"
 	"os"
 	"sort"
 	"sync"
+	logger "until/xlog4go"
 )
 
 const (
-	MAXPOOLSIZE = 1024*1024*2
-	MEMQUEUESIZE = 10
+	MAXPOOLSIZE   = 1024 * 1024 * 2
+	MEMQUEUESIZE  = 10
+	VACCUMSIZE    = 1024 * 1024 * 2
+	GCMINFILESIZE = 1024 * 1024 * 64
+)
+
+var (
+	Curtr        *BTree
+	VaccumHolder *VaccumData
 )
 
 type ValuePool struct {
@@ -23,8 +30,13 @@ type ValuePool struct {
 	MtMutex       *sync.Mutex
 }
 
-func InitValuePoolQueue(size int)chan *ValuePool{
-	c := make(chan *ValuePool,size)
+type VaccumData struct {
+	VaccumFlag bool
+	VMutex     *sync.Mutex
+}
+
+func InitValuePoolQueue(size int) chan *ValuePool {
+	c := make(chan *ValuePool, size)
 	for i := 0; i < size; i++ {
 		vp := NewValuePool(0)
 		c <- vp
@@ -40,7 +52,7 @@ func NewValuePool(eof uint64) *ValuePool {
 		CurrentOffest: 0,
 		RemoveValues:  rlist,
 		MemeryTail:    b,
-		MtMutex: new(sync.Mutex),
+		MtMutex:       new(sync.Mutex),
 	}
 }
 
@@ -125,8 +137,9 @@ func GetFileOffset(f *os.File) uint64 {
 }
 
 func WriteAt(whence uint64, w []byte, f *os.File) {
-	if _, err := f.WriteAt(w, int64(whence)); err != nil {
-		log.Fatal(err)
+	_, err := f.WriteAt(w, int64(whence))
+	if err != nil {
+		logger.Error("WriteAt is error: %v", err)
 	}
 }
 
@@ -158,16 +171,16 @@ func BatchReadAt(offsets []uint64, cow *copyOnWriteContext) []*InternalValue {
 	return values
 }
 
-func ValuePoolReadAt(vPool *ValuePool,off uint64)*InternalValue{
+func ValuePoolReadAt(vPool *ValuePool, off uint64) *InternalValue {
 	vPool.MtMutex.Lock()
-	if off < vPool.EofOffset || off >= vPool.EofOffset + vPool.CurrentOffest {
+	if off < vPool.EofOffset || off >= vPool.EofOffset+vPool.CurrentOffest {
 		vPool.MtMutex.Unlock()
 		return nil
 	}
 	relativeOff := off - vPool.EofOffset
 	length := binary.LittleEndian.Uint32(vPool.MemeryTail[relativeOff+1 : relativeOff+5])
 	iLen := length + common.INT8_LEN + common.INT64_LEN + common.INT32_LEN + CRCSIZE
-	bs := make([]byte,iLen)
+	bs := make([]byte, iLen)
 	copy(bs, vPool.MemeryTail[relativeOff:relativeOff+uint64(iLen)])
 	vPool.MtMutex.Unlock()
 	return BytesToInternalValue(bs)
@@ -175,20 +188,20 @@ func ValuePoolReadAt(vPool *ValuePool,off uint64)*InternalValue{
 
 func MemReadAt(off uint64, cow *copyOnWriteContext) *InternalValue {
 	cur := cow.curVPool
-	iv := ValuePoolReadAt(cur,off)
+	iv := ValuePoolReadAt(cur, off)
 	if iv != nil {
 		return iv
 	}
 	l := cow.fullQueue
 	for e := l.Front(); e != nil; e = e.Next() {
-		iv = ValuePoolReadAt(e.Value.(*ValuePool),off)
+		iv = ValuePoolReadAt(e.Value.(*ValuePool), off)
 		if iv != nil {
 			return iv
 		}
 	}
 	l = cow.flushQueue
 	for e := l.Front(); e != nil; e = e.Next() {
-		iv = ValuePoolReadAt(e.Value.(*ValuePool),off)
+		iv = ValuePoolReadAt(e.Value.(*ValuePool), off)
 		if iv != nil {
 			return iv
 		}
@@ -207,12 +220,12 @@ func BatchMemReadAt(offsets []uint64, cow *copyOnWriteContext) []*InternalValue 
 func FileReadAt(off uint64, f *os.File) *InternalValue {
 	lbyte := make([]byte, common.INT32_LEN)
 	if _, err := f.ReadAt(lbyte, int64(off)+int64(common.INT8_LEN)); err != nil {
-		log.Fatal(err)
+		logger.Error("FileReadAt is error: %v", err)
 	}
 	length := binary.LittleEndian.Uint32(lbyte)
 	bs := make([]byte, length+common.INT8_LEN+common.INT64_LEN+common.INT32_LEN+CRCSIZE)
 	if _, err := f.ReadAt(bs, int64(off)); err != nil {
-		log.Fatal(err)
+		logger.Error("FileReadAt is error: %v", err)
 	}
 	return BytesToInternalValue(bs)
 }
@@ -226,7 +239,7 @@ func BatchFileReadAt(offsets []uint64, f *os.File) []*InternalValue {
 	return values
 }
 
-func Flush(cow *copyOnWriteContext){
+func Flush(cow *copyOnWriteContext) {
 	var vp *ValuePool
 	for e := cow.flushQueue.Front(); e != nil; e = e.Next() {
 		vp = e.Value.(*ValuePool)
@@ -239,10 +252,80 @@ func Flush(cow *copyOnWriteContext){
 			WriteAt(off, []byte{1}, cow.dataFile)
 		}
 		vp.RemoveValues = list.New()
-		vp.MtMutex.Lock()
 		cow.emptyQueue <- vp
-		vp.MtMutex.Unlock()
 	}
 	cow.flushQueue = list.New()
 	cow.flushFinish = true
+}
+func BatchBytesToInternalValues(bs []byte) ([]*InternalValue, uint64) {
+	iStart, iEnd := 0, 0
+	iv := make([]*InternalValue, 0, 16)
+	l := len(bs)
+	for {
+		if iStart+5 < l {
+			length := binary.LittleEndian.Uint32(bs[iStart+1 : iStart+5])
+			totalSz := length + common.INT8_LEN + common.INT64_LEN + common.INT32_LEN + CRCSIZE
+			iEnd = iStart + int(totalSz)
+			if iEnd <= l {
+				v := BytesToInternalValue(bs[iStart:iEnd])
+				iv = append(iv, v)
+				iStart = iEnd
+			} else {
+				break
+			}
+
+		} else {
+			break
+		}
+
+	}
+	return iv, uint64(iEnd)
+}
+
+func VaccumInsert(bs []byte, off uint64, f *os.File, tr *BTree) uint64 {
+	_, err := f.ReadAt(bs, int64(off))
+	if err != nil {
+		logger.Info("read file is error: %v", err)
+	}
+	iv, n := BatchBytesToInternalValues(bs)
+	off = off + n
+	for _, o := range iv {
+		if o.IsRemove == false {
+			tr.InternalInsert(o.Key, o.Value)
+		}
+	}
+	return off
+}
+
+func Vaccum(cow *copyOnWriteContext) {
+	logger.Info("this time vaccum starting")
+	table := NewTable("./data", "test", "test", "primaryKey_1", "data_1")
+	f := table.CreateTable()
+	btr := BuildBTreeFromPage(table.GetTablePath(), f)
+	dataFile := cow.dataFile
+	sentryOffset := cow.curFileOffset
+	iStart, iEnd := uint64(0), uint64(0)
+	bs := make([]byte, VACCUMSIZE)
+	for iEnd < sentryOffset {
+		iStart = VaccumInsert(bs, iStart, dataFile, btr)
+		sentryOffset = cow.curFileOffset
+		iEnd = iStart + VACCUMSIZE
+	}
+	iStart = VaccumInsert(bs[0:(sentryOffset-iStart)], iStart, dataFile, btr)
+	VaccumHolder.VMutex.Lock()
+	fileOffset := cow.curVPool.EofOffset + cow.curVPool.CurrentOffest
+	cow.fullQueue.PushBack(cow.curVPool)
+	cow.flushQueue = cow.fullQueue
+	cow.fullQueue = list.New()
+	Flush(cow)
+	sentryOffset = fileOffset
+	l := sentryOffset - iStart
+	bs = make([]byte, l)
+	VaccumInsert(bs[0:l], iStart, dataFile, btr)
+	tmp := Curtr
+	Curtr = btr
+	VaccumHolder.VaccumFlag = false
+	VaccumHolder.VMutex.Unlock()
+	freeBtree(tmp)
+	logger.Info("this time vaccum finished")
 }

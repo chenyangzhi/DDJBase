@@ -14,14 +14,16 @@ type Table struct {
 	table      string
 	dataBase   string
 	columnName string
+	fileName   string
 }
 
-func NewTable(basePath, table, dataBase, columnName string) *Table {
+func NewTable(basePath, table, dataBase, columnName, fileName string) *Table {
 	return &Table{
 		basePath:   basePath,
 		table:      table,
 		dataBase:   dataBase,
 		columnName: columnName,
+		fileName:   fileName,
 	}
 }
 func (table Table) GetTablePath() string {
@@ -29,7 +31,7 @@ func (table Table) GetTablePath() string {
 }
 
 func (table Table) GetTableDataPath() string {
-	return fmt.Sprintf("%v/%v/%v/%v", table.basePath, table.dataBase, table.table, "data")
+	return fmt.Sprintf("%v/%v/%v/%v", table.basePath, table.dataBase, table.table, table.fileName)
 }
 
 func (table Table) CreateTable() *os.File {
@@ -43,7 +45,7 @@ func (table Table) CreateTable() *os.File {
 	common.Check(iowrapper.CreateSparseFile(path, 4096*1000000))
 	f, err := os.OpenFile(path, os.O_RDWR, 0666)
 	common.Check(err)
-	metaPage := NewMetaPage(INITROOTNULL, MAXPAGENUMBER/8)
+	metaPage := NewMetaPage(INITROOTNULL, MAXPAGENUMBER/8, 0)
 	bs := metaPage.ToBytes()
 	mapregion, err := mmap.MapRegion(f, METAPAGEMAXLENGTH, mmap.RDWR, 0, 0)
 	copy(mapregion, bs)

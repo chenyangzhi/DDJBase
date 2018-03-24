@@ -43,14 +43,14 @@ func MmapIndexFile() {
 }
 
 func WriteFile(fileName string, b []byte) {
-	err := ioutil.WriteFile("output.txt", b, 0644)
+	err := ioutil.WriteFile(fileName, b, 0644)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func CreateDataFile(filePath string) *os.File {
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -6,9 +6,10 @@ import (
 )
 
 type BtreeNodeItem struct {
-	Key     uint64
-	IdxId   uint64
-	KeyType byte
+	Key       uint64
+	IdxId     uint64
+	KeyLength uint32
+	KeyType   byte
 }
 
 func (item BtreeNodeItem) GetBtreeNodeItemID() uint64 {
@@ -17,16 +18,17 @@ func (item BtreeNodeItem) GetBtreeNodeItemID() uint64 {
 func (item BtreeNodeItem) GetBtreeNodeItemKey() uint64 {
 	return item.Key
 }
-func NewBtreeNodeItem(key, idxId uint64, keyType byte) *BtreeNodeItem {
+func NewBtreeNodeItem(key, idxId uint64, keyType byte, keyLength uint32) *BtreeNodeItem {
 	return &BtreeNodeItem{
-		Key:     key,
-		IdxId:   idxId,
-		KeyType: keyType,
+		Key:       key,
+		IdxId:     idxId,
+		KeyLength: keyLength,
+		KeyType:   keyType,
 	}
 }
 
 func (item BtreeNodeItem) Size() uint16 {
-	return common.INT64_LEN + common.INT64_LEN + common.INT8_LEN
+	return common.INT64_LEN + common.INT64_LEN + common.INT8_LEN + common.INT32_LEN
 }
 
 func (item BtreeNodeItem) ToBytes(bytes []byte) int32 {
@@ -36,6 +38,9 @@ func (item BtreeNodeItem) ToBytes(bytes []byte) int32 {
 	iStart = iEnd
 	iEnd = iStart + common.INT64_LEN
 	binary.LittleEndian.PutUint64(bytes[iStart:iEnd], item.IdxId)
+	iStart = iEnd
+	iEnd = iStart + common.INT32_LEN
+	binary.LittleEndian.PutUint32(bytes[iStart:iEnd], item.KeyLength)
 	iStart = iEnd
 	iEnd = iStart + common.BYTE_LEN
 	bytes[iStart] = item.KeyType
@@ -58,6 +63,9 @@ func BytesToBtreeNodeItems(barr []byte, count uint16) []*BtreeNodeItem {
 		iStart = iEnd
 		iEnd = iStart + common.INT64_LEN
 		b.IdxId = binary.LittleEndian.Uint64(barr[iStart:iEnd])
+		iStart = iEnd
+		iEnd = iStart + common.INT32_LEN
+		b.KeyLength = binary.LittleEndian.Uint32(barr[iStart:iEnd])
 		iStart = iEnd
 		iEnd = iStart + common.BYTE_LEN
 		b.KeyType = barr[iStart]

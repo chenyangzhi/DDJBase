@@ -5,12 +5,12 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	pb "kvprobuf"
-	"net"
-	"table/index"
-	logger "until/xlog4go"
-	"runtime"
 	"log"
+	"net"
+	"runtime"
+	"table/index"
 	"time"
+	logger "until/xlog4go"
 )
 
 var (
@@ -48,9 +48,9 @@ func (s *server) AscendIterate(ctx context.Context, param *pb.Slice) (*pb.Ascend
 func (s *server) Put(ctx context.Context, param *pb.Slice) (*pb.PutResponse, error) {
 	var p pb.PutResponse
 	t := time.Now()
-	tr.Insert(param.Key, param.Value)
+	index.Insert(param.Key, param.Value)
 	elapsed := time.Since(t)
-	logger.Info("the requeset finished in %v",elapsed)
+	logger.Info("the requeset finished in %v", elapsed)
 	p.Success = true
 	return &p, nil
 }
@@ -66,10 +66,8 @@ func (s *server) Get(ctx context.Context, param *pb.Slice) (*pb.GetResponse, err
 }
 
 func (s *server) Delete(ctx context.Context, param *pb.Slice) (*pb.DeleteResponse, error) {
-	var bItem index.BtreeNodeItem
 	var p pb.DeleteResponse
-	bItem.IdxId = param.Key
-	it := tr.Delete(bItem)
+	it := index.Delete(param.Key)
 	if it == nil {
 		p.Success = false
 		p.Value = []byte{}
@@ -101,7 +99,7 @@ func main() {
 	s := grpc.NewServer()
 	pb.RegisterDDJkvServer(s, &server{})
 	go memery()
-	table := index.NewTable("./data", "test", "test", "primaryKey")
+	table := index.NewTable("./data", "test", "test", "primaryKey", "data")
 	f := table.CreateTable()
 	tr = index.BuildBTreeFromPage(table.GetTablePath(), f)
 	s.Serve(lis)

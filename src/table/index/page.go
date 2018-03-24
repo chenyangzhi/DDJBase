@@ -2,11 +2,11 @@ package index
 
 import (
 	"common"
-	"github.com/edsrzf/mmap-go"
-	//logger "until/xlog4go"
-	"fmt"
-	"os"
 	"container/list"
+	"fmt"
+	"github.com/edsrzf/mmap-go"
+	"os"
+	"sync"
 )
 
 const (
@@ -134,15 +134,22 @@ func (n node) NodeToPage() *BtreeNodePage {
 func BuildBTreeFromPage(baseTableColumn string, f *os.File) *BTree {
 	tr := New(DEGREE, baseTableColumn)
 	tr.cow.dataFile = f
+	tr.cow.dataFilePath = f.Name()
+	tr.cow.indexFilePath = tr.cow.f.Name()
 	tr.cow.emptyQueue = InitValuePoolQueue(MEMQUEUESIZE)
 	tr.cow.fullQueue = list.New()
 	tr.cow.flushQueue = list.New()
 	tr.cow.flushFinish = true
 	eof := GetFileOffset(tr.cow.dataFile)
-	tr.cow.curVPool = <- tr.cow.emptyQueue
+	tr.cow.curVPool = <-tr.cow.emptyQueue
 	tr.cow.curVPool.EofOffset = eof
 	tr.cow.curFileOffset = eof
+	VaccumHolder = &VaccumData{}
+	VaccumHolder.VaccumFlag = false
+	VaccumHolder.VMutex = &sync.Mutex{}
+	tr.cow.readRef = 0
 	rootId := tr.cow.mtPage.RootId
+	tr.cow.mtPage.TotalRemoved = tr.cow.mtPage.TotalRemoved
 	if rootId == INITROOTNULL {
 		return tr
 	}

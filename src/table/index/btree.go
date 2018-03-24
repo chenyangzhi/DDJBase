@@ -2,14 +2,17 @@ package index
 
 import (
 	"common"
+	"container/list"
 	"fmt"
 	"github.com/edsrzf/mmap-go"
 	"io"
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 	"until"
-	"container/list"
+	logger "until/xlog4go"
 )
 
 type Item interface {
@@ -482,23 +485,26 @@ type BTree struct {
 }
 
 type copyOnWriteContext struct {
-	freelist  *FreeList
-	f         *os.File
-	dataFile  *os.File
-	emptyList []uint32
-	NewPage   common.Set
-	mmapmap   map[uint32]mmap.MMap
-	nodeIdMap map[uint32]*node
-	mtPage    *MetaPage
-	metaMmap  mmap.MMap
-	dirtyPage common.Set
-	cache     *until.LRU
-	curVPool  *ValuePool
+	freelist      *FreeList
+	f             *os.File
+	indexFilePath string
+	dataFile      *os.File
+	dataFilePath  string
+	emptyList     []uint32
+	NewPage       common.Set
+	mmapmap       map[uint32]mmap.MMap
+	nodeIdMap     map[uint32]*node
+	mtPage        *MetaPage
+	metaMmap      mmap.MMap
+	dirtyPage     common.Set
+	cache         *until.LRU
+	curVPool      *ValuePool
 	curFileOffset uint64
-	fullQueue  *list.List
-	flushQueue *list.List
-	flushFinish bool
-	emptyQueue chan *ValuePool
+	fullQueue     *list.List
+	flushQueue    *list.List
+	flushFinish   bool
+	emptyQueue    chan *ValuePool
+	readRef       int64
 }
 
 func (t *BTree) Clone() (t2 *BTree) {
@@ -540,10 +546,39 @@ func (c *copyOnWriteContext) freeNode(n *node) {
 	}
 }
 
-func (tr *BTree) Insert(key uint64, value []byte) *BtreeNodeItem {
-	offset := tr.cow.curVPool.CurrentOffest
-	fileOffset := tr.cow.curVPool.EofOffset
-	bItem := NewBtreeNodeItem(offset, key, 1)
+func freeBtree(btr *BTree) {
+	readRef := atomic.LoadInt64(&btr.cow.readRef)
+	for {
+		if readRef == 0 {
+			logger.Info("Vaccum is finished and the index file %v and the data file %v is removed",
+				btr.cow.indexFilePath, btr.cow.dataFilePath)
+			btr.cow.dataFile.Close()
+			os.Remove(btr.cow.dataFilePath)
+			btr.cow.f.Close()
+			os.Remove(btr.cow.indexFilePath)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func Insert(key uint64, value []byte) *BtreeNodeItem {
+	var bItem *BtreeNodeItem
+	if VaccumHolder.VaccumFlag == true {
+		VaccumHolder.VMutex.Lock()
+		bItem = Curtr.InternalInsert(key, value)
+		VaccumHolder.VMutex.Unlock()
+	} else {
+		bItem = Curtr.InternalInsert(key, value)
+	}
+	return bItem
+}
+
+func (tr *BTree) InternalInsert(key uint64, value []byte) *BtreeNodeItem {
+	cow := tr.cow
+	offset := cow.curVPool.CurrentOffest
+	fileOffset := cow.curVPool.EofOffset
+	bItem := NewBtreeNodeItem(offset, key, 1, uint32(len(value)))
 	bItem.Key = fileOffset + offset
 	result := tr.ReplaceOrInsert(bItem)
 	iv := NewInternalValue(false, uint32(len(value)), key, value)
@@ -551,24 +586,32 @@ func (tr *BTree) Insert(key uint64, value []byte) *BtreeNodeItem {
 	lv := len(bv)
 	currentOffset := offset + uint64(lv)
 	if currentOffset < MAXPOOLSIZE {
-		copy(tr.cow.curVPool.MemeryTail[offset:currentOffset], bv)
-		tr.cow.curVPool.CurrentOffest = currentOffset
+		copy(cow.curVPool.MemeryTail[offset:currentOffset], bv)
+		cow.curVPool.CurrentOffest = currentOffset
 	} else {
-		tr.cow.fullQueue.PushBack(tr.cow.curVPool)
-		if tr.cow.flushFinish == true && tr.cow.fullQueue.Len() > MEMQUEUESIZE/2 {
-			tr.cow.flushQueue = tr.cow.fullQueue
-			tr.cow.fullQueue = list.New()
-			tr.cow.flushFinish = false
-			go Flush(tr.cow)
+		cow.fullQueue.PushBack(cow.curVPool)
+		if cow.flushFinish == true && cow.fullQueue.Len() > MEMQUEUESIZE/2 {
+			cow.flushQueue = cow.fullQueue
+			cow.fullQueue = list.New()
+			cow.flushFinish = false
+			go Flush(cow)
 		}
-		tr.cow.curVPool = <- tr.cow.emptyQueue
-		tr.cow.curVPool.EofOffset = offset + fileOffset
+		cow.curVPool = <-cow.emptyQueue
+		cow.curVPool.EofOffset = offset + fileOffset
 		currentOffset = uint64(lv)
-		copy(tr.cow.curVPool.MemeryTail[0:currentOffset], bv)
-		tr.cow.curVPool.CurrentOffest = currentOffset
+		copy(cow.curVPool.MemeryTail[0:currentOffset], bv)
+		cow.curVPool.CurrentOffest = currentOffset
+		// need vaccum
+		if tr.cow.mtPage.TotalRemoved*2 > tr.cow.curFileOffset && tr.cow.curFileOffset > GCMINFILESIZE {
+			if VaccumHolder.VaccumFlag == false {
+				VaccumHolder.VaccumFlag = true
+				go Vaccum(cow)
+			}
+		}
 	}
 	if result != nil {
-		tr.cow.curVPool.RemoveValues.PushBack(result)
+		cow.mtPage.TotalRemoved = cow.mtPage.TotalRemoved + uint64(result.(*BtreeNodeItem).KeyLength) + 15
+		cow.curVPool.RemoveValues.PushBack(result)
 		return result.(*BtreeNodeItem)
 	}
 	return nil
@@ -603,9 +646,25 @@ func (t *BTree) ReplaceOrInsert(item Item) Item {
 	return out
 }
 
-func (t *BTree) Delete(item Item) []byte {
+func Delete(key uint64) []byte {
+	var bItem BtreeNodeItem
+	var bs []byte
+	bItem.IdxId = key
+	if VaccumHolder.VaccumFlag == true {
+		VaccumHolder.VMutex.Lock()
+		bs = Curtr.InternalDelete(bItem)
+		VaccumHolder.VMutex.Unlock()
+		VaccumHolder.VaccumFlag = false
+	} else {
+		bs = Curtr.InternalDelete(bItem)
+	}
+	return bs
+}
+
+func (t *BTree) InternalDelete(item Item) []byte {
 	r := t.deleteItem(item, removeItem)
 	t.cow.curVPool.RemoveValues.PushBack(r)
+	t.cow.mtPage.TotalRemoved = t.cow.mtPage.TotalRemoved + uint64(r.(*BtreeNodeItem).KeyLength) + 15
 	if r == nil {
 		return nil
 	}
@@ -726,16 +785,20 @@ func (t *BTree) Descend(iterator ItemIterator) {
 
 func (tr *BTree) GetByKey(key uint64) []byte {
 	var b BtreeNodeItem
+	var v []byte
+	atomic.AddInt64(&(tr.cow.readRef), 1)
 	b.IdxId = key
 	item := tr.Get(&b)
 	if item != nil {
 		bItem := (tr.Get(&b)).(*BtreeNodeItem)
 		offset := bItem.GetBtreeNodeItemKey()
 		iv := ReadAt(offset, tr.cow)
-		v := iv.Value
-		return v
+		v = iv.Value
+	} else {
+		v = []byte{}
 	}
-	return nil
+	atomic.AddInt64(&(tr.cow.readRef), -1)
+	return v
 }
 
 func (t *BTree) Get(key Item) Item {
@@ -806,6 +869,8 @@ func (tr BTree) Commit() {
 	tr.cow.flushQueue = tr.cow.fullQueue
 	tr.cow.fullQueue = list.New()
 	Flush(tr.cow)
-	tr.cow.curVPool = <- tr.cow.emptyQueue
+	tr.cow.curVPool = <-tr.cow.emptyQueue
 	tr.cow.curVPool.EofOffset = fileOffset
+	off := tr.cow.curFileOffset
+	fmt.Println("the final offset is ", off)
 }

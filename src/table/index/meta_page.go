@@ -11,14 +11,16 @@ type MetaPage struct {
 	Magic          uint32
 	RootId         uint32
 	EmptyPageCount uint32
+	TotalRemoved   uint64
 	EmptyPage      []byte
 }
 
-func NewMetaPage(rootId uint32, emptyCount uint32) *MetaPage {
+func NewMetaPage(rootId uint32, emptyCount uint32, total uint64) *MetaPage {
 	return &MetaPage{
 		Magic:          MAGIC,
 		RootId:         rootId,
 		EmptyPageCount: emptyCount,
+		TotalRemoved:   total,
 		EmptyPage:      make([]byte, emptyCount, emptyCount),
 	}
 }
@@ -39,6 +41,9 @@ func (metaPage MetaPage) ToBytes() []byte {
 	iStart = iEnd
 	iEnd = iStart + common.INT32_LEN
 	binary.LittleEndian.PutUint32(bs[iStart:iEnd], uint32(metaPage.EmptyPageCount))
+	iStart = iEnd
+	iEnd = iStart + common.INT64_LEN
+	binary.LittleEndian.PutUint32(bs[iStart:iEnd], uint32(metaPage.TotalRemoved))
 	iStart = iEnd
 	iEnd = iStart + len(metaPage.EmptyPage)
 	_assert(metaPage.EmptyPage != nil, "the meta empty page is nil")
@@ -61,6 +66,9 @@ func BytesToMetaPage(barr []byte) *MetaPage {
 	iStart = iEnd
 	iEnd = iStart + common.INT32_LEN
 	item.EmptyPageCount = binary.LittleEndian.Uint32(barr[iStart:iEnd])
+	iStart = iEnd
+	iEnd = iStart + common.INT64_LEN
+	item.TotalRemoved = binary.LittleEndian.Uint64(barr[iStart:iEnd])
 	item.EmptyPage = make([]byte, emptyPageLength, emptyPageLength)
 	iStart = iEnd
 	iEnd = iStart + emptyPageLength

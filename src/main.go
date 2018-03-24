@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 	"table/index"
 	"time"
 	logger "until/xlog4go"
@@ -36,15 +35,15 @@ func main() {
 		panic(err)
 	}
 	defer logger.Close()
-	table := index.NewTable("/home/chenyangzhi/workplace/client_server/data", "test", "test", "primaryKey")
+	table := index.NewTable("./data", "test", "test", "primaryKey", "data")
 	f := table.CreateTable()
 	//vals := rand.Perm(*size)
 	vals := GetIncreasedArray(*size)
-	tr := index.BuildBTreeFromPage(table.GetTablePath(), f)
+	index.Curtr = index.BuildBTreeFromPage(table.GetTablePath(), f)
 	t := time.Now()
 	for _, v := range vals {
 		bs := "13434534534adsfgdsafffffffffffffgagagsadgsdfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffretsrgsdfgdsfgsdfgdf"
-		tr.Insert(uint64(v), []byte(bs))
+		index.Insert(uint64(v), []byte(bs))
 	}
 
 	elapsed := time.Since(t)
@@ -52,15 +51,11 @@ func main() {
 	//t = time.Now()
 	count := 0
 	for _, v := range vals {
-		val := tr.GetByKey(uint64(v))
-		vv := string(val)
-		if val != nil {
-			if v == 999999 {
-				fmt.Println("the key is ", v, " the value is", vv)
-			}
-		} else {
-			count++
+		val := index.Curtr.GetByKey(uint64(v))
+		if val == nil || len(val) == 0 {
 			fmt.Println("error: not found val = ", v)
+		} else {
+			logger.Info("the key %v is found!", v)
 		}
 	}
 	elapsed = time.Since(t)
@@ -69,7 +64,8 @@ func main() {
 	//root.Print(os.Stdout, 2)
 	fmt.Println("the not fount count is ", count)
 	fmt.Println("the time elapsed ", elapsed)
-	tr.Commit()
-	os.Exit(0)
-
+	for {
+		time.Sleep(1 * time.Second)
+		index.Curtr.Commit()
+	}
 }
