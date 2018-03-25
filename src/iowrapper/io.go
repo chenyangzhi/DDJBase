@@ -39,7 +39,6 @@ func TruncateIndexFile(pathFile string, extendSize int64) error {
 }
 
 func MmapIndexFile() {
-
 }
 
 func WriteFile(fileName string, b []byte) {

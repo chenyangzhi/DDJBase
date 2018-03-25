@@ -97,32 +97,35 @@ func main() {
 	defer logger.Close()
 	InitClient()
 	next := find(uint64(300))
+	t := time.Now()
 	for {
-		v, err := next()
+		_, err := next()
 		if err != nil {
 			break
 		}
-		logger.Info("the value is %v", string(v))
-	}
-	key := uint64(125)
-	t := time.Now()
-	for i := 0; i < 1000000; i++ {
-		if i%1000 == 0 {
-			logger.Info("%v key is put ", i)
-		}
-		str := "1234asdfsdfsdfsadfsdfsdfasfddfasdfasdfasdfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafsdfsdfsdfasdfadsfadfadsfadfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafasdffasdf"
-		Put(uint64(i), []byte(str))
+		//logger.Info("the value is %v", string(v))
 	}
 	elapsed := time.Since(t)
 	logger.Info("Put 100000000 key in DDJkv elapsed %s", elapsed)
-	b := Get(key)
-	if len(b) != 0 {
-		logger.Info("Get: the key is %v%s%v", key, " the value is ", string(b))
-	} else {
-		logger.Info("Get: the key is %v %s", key, " is not found!")
-	}
-	b = Delete(key)
-	if b != nil {
-		logger.Info("Delete: the key is %v%s%v", key, " the value is ", string(b))
-	}
+	//key := uint64(125)
+	//t := time.Now()
+	//for i := 0; i < 1000000; i++ {
+	//	if i%1000 == 0 {
+	//		logger.Info("%v key is put ", i)
+	//	}
+	//	str := "1234asdfsdfsdfsadfsdfsdfasfddfasdfasdfasdfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafsdfsdfsdfasdfadsfadfadsfadfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaafasdffasdf"
+	//	Put(uint64(i), []byte(str))
+	//}
+	//elapsed := time.Since(t)
+	//logger.Info("Put 100000000 key in DDJkv elapsed %s", elapsed)
+	//b := Get(key)
+	//if len(b) != 0 {
+	//	logger.Info("Get: the key is %v%s%v", key, " the value is ", string(b))
+	//} else {
+	//	logger.Info("Get: the key is %v %s", key, " is not found!")
+	//}
+	//b = Delete(key)
+	//if b != nil {
+	//	logger.Info("Delete: the key is %v%s%v", key, " the value is ", string(b))
+	//}
 }

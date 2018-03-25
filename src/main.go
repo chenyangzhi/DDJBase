@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	size    = flag.Int("size", 1000000, "size of the tree to build")
+	size    = flag.Int("size", 100000000, "size of the tree to build")
 	logconf = flag.String("l", "./conf/log.json", "log config file path")
 )
 
@@ -35,11 +35,11 @@ func main() {
 		panic(err)
 	}
 	defer logger.Close()
-	table := index.NewTable("./data", "test", "test", "primaryKey", "data")
-	f := table.CreateTable()
+	table := index.NewTable("./data", "test", "test")
+	f := table.CreateNewTable()
 	//vals := rand.Perm(*size)
 	vals := GetIncreasedArray(*size)
-	index.Curtr = index.BuildBTreeFromPage(table.GetTablePath(), f)
+	index.Curtr = index.BuildBTreeFromPage(table.GetIndexPath(), f)
 	t := time.Now()
 	for _, v := range vals {
 		bs := "13434534534adsfgdsafffffffffffffgagagsadgsdfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffretsrgsdfgdsfgsdfgdf"
@@ -54,8 +54,6 @@ func main() {
 		val := index.Curtr.GetByKey(uint64(v))
 		if val == nil || len(val) == 0 {
 			fmt.Println("error: not found val = ", v)
-		} else {
-			logger.Info("the key %v is found!", v)
 		}
 	}
 	elapsed = time.Since(t)

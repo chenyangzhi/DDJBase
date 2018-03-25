@@ -15,7 +15,7 @@
     },
 
     "ConsoleWriter" : {
-        "On" : true,
+        "On" : false,
         "Color" : true
     }
 }

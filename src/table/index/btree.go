@@ -589,6 +589,7 @@ func (tr *BTree) InternalInsert(key uint64, value []byte) *BtreeNodeItem {
 		copy(cow.curVPool.MemeryTail[offset:currentOffset], bv)
 		cow.curVPool.CurrentOffest = currentOffset
 	} else {
+		//the memery is full, so need to flush
 		cow.fullQueue.PushBack(cow.curVPool)
 		if cow.flushFinish == true && cow.fullQueue.Len() > MEMQUEUESIZE/2 {
 			cow.flushQueue = cow.fullQueue
@@ -871,6 +872,5 @@ func (tr BTree) Commit() {
 	Flush(tr.cow)
 	tr.cow.curVPool = <-tr.cow.emptyQueue
 	tr.cow.curVPool.EofOffset = fileOffset
-	off := tr.cow.curFileOffset
-	fmt.Println("the final offset is ", off)
+	logger.Info("this time commit finished!")
 }

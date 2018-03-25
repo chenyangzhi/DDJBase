@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"path/filepath"
+	"until"
 )
 
 func TestHumanReadData(t *testing.T) {
+	fmt.Println(until.Goid())
+	path := "/some/path/to/remove/file.name"
+	file := filepath.Base(path)
+	fmt.Println(file)
 	b := make([]byte, 5100) //设置读取的字节数
 	f, _ := os.OpenFile("/home/chenyangzhi/workplace/client_server/data/test/test/data_1", os.O_RDWR, os.ModePerm)
 	n, _ := f.Read(b)

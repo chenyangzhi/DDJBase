@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/edsrzf/mmap-go"
 	"os"
-	"sync"
 )
 
 const (
@@ -18,7 +17,6 @@ const (
 	DEGREE            = 90
 	MAGIC             = 0x0dd6cfbb
 	CRCSIZE           = 2
-	MAXKEYSIZE        = 128
 	BLOCKSIZE         = 4096 * 2
 )
 
@@ -116,9 +114,6 @@ func (n node) NodeToPage() *BtreeNodePage {
 	itemLength := uint16(len(n.items))
 	childLength := uint16(len(n.children))
 	childrenId := make([]uint32, childLength, childLength)
-	if childLength == 123 {
-		fmt.Println("the childLength is", childLength)
-	}
 	for i, id := range n.children {
 		childrenId[i] = id.childNodeId
 	}
@@ -144,9 +139,6 @@ func BuildBTreeFromPage(baseTableColumn string, f *os.File) *BTree {
 	tr.cow.curVPool = <-tr.cow.emptyQueue
 	tr.cow.curVPool.EofOffset = eof
 	tr.cow.curFileOffset = eof
-	VaccumHolder = &VaccumData{}
-	VaccumHolder.VaccumFlag = false
-	VaccumHolder.VMutex = &sync.Mutex{}
 	tr.cow.readRef = 0
 	rootId := tr.cow.mtPage.RootId
 	tr.cow.mtPage.TotalRemoved = tr.cow.mtPage.TotalRemoved

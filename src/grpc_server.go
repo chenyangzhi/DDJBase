@@ -99,7 +99,7 @@ func main() {
 	s := grpc.NewServer()
 	pb.RegisterDDJkvServer(s, &server{})
 	go memery()
-	table := index.NewTable("./data", "test", "test", "primaryKey", "data")
+	table := index.NewTable("./data", "test", "test")
 	f := table.CreateTable()
 	tr = index.BuildBTreeFromPage(table.GetTablePath(), f)
 	s.Serve(lis)
