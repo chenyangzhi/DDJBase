@@ -3,8 +3,8 @@ package until
 import (
 	"fmt"
 	"runtime"
-	"strings"
 	"strconv"
+	"strings"
 )
 
 func Assert(condition bool, msg string, v ...interface{}) {
@@ -13,9 +13,10 @@ func Assert(condition bool, msg string, v ...interface{}) {
 	}
 }
 func Goid() int {
-	defer func()  {
+	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println("panic recover:panic info:%v", err)     }
+			fmt.Println("panic recover:panic info:%v", err)
+		}
 	}()
 
 	var buf [64]byte

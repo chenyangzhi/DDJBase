@@ -3,8 +3,8 @@ package index
 import (
 	"fmt"
 	"os"
-	"testing"
 	"path/filepath"
+	"testing"
 	"until"
 )
 

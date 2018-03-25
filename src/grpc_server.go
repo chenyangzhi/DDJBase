@@ -100,7 +100,7 @@ func main() {
 	pb.RegisterDDJkvServer(s, &server{})
 	go memery()
 	table := index.NewTable("./data", "test", "test")
-	f := table.CreateTable()
+	f := table.CreateNewTable()
 	tr = index.BuildBTreeFromPage(table.GetTablePath(), f)
 	s.Serve(lis)
 }

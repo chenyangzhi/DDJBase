@@ -5,10 +5,10 @@ import (
 	"container/list"
 	"encoding/binary"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	logger "until/xlog4go"
-	"path/filepath"
 )
 
 const (
@@ -19,9 +19,9 @@ const (
 )
 
 var (
-	Curtr        *BTree
+	Curtr          *BTree
 	ManifeshHandle *os.File
-	VaccumHolder *VaccumData
+	VaccumHolder   *VaccumData
 )
 
 type ValuePool struct {
@@ -301,8 +301,8 @@ func VaccumInsert(bs []byte, off uint64, f *os.File, tr *BTree) uint64 {
 
 func Vaccum(cow *copyOnWriteContext) {
 	logger.Info("this time vaccum starting")
-	table := NewTable("./data", "test", "test",)
-	f := table.CreateTable("","")
+	table := NewTable("./data", "test", "test")
+	f := table.CreateTable("", "")
 	btr := BuildBTreeFromPage(table.GetIndexPath(), f)
 	dataFile := cow.dataFile
 	sentryOffset := cow.curFileOffset
@@ -326,7 +326,7 @@ func Vaccum(cow *copyOnWriteContext) {
 	VaccumInsert(bs[0:l], iStart, dataFile, btr)
 	tmp := Curtr
 	Curtr = btr
-	ManifestWrite(filepath.Base(btr.cow.f.Name()),filepath.Base(btr.cow.dataFile.Name()),
+	ManifestWrite(filepath.Base(btr.cow.f.Name()), filepath.Base(btr.cow.dataFile.Name()),
 		cow.mtPage.TotalRemoved)
 	VaccumHolder.VaccumFlag = false
 	VaccumHolder.VMutex.Unlock()
