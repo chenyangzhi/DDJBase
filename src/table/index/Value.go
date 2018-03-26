@@ -281,7 +281,7 @@ func BatchBytesToInternalValues(bs []byte) ([]*InternalValue, uint64) {
 		}
 
 	}
-	return iv, uint64(iEnd)
+	return iv, uint64(iStart)
 }
 
 func VaccumInsert(bs []byte, off uint64, f *os.File, tr *BTree) uint64 {

@@ -247,6 +247,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 	if found {
 		out := n.items[i]
 		n.items[i] = item
+		n.cow.dirtyPage.Insert(n.nodeId)
 		return out
 	}
 	if len(n.children) == 0 {
@@ -575,16 +576,21 @@ func Insert(key uint64, value []byte) *BtreeNodeItem {
 }
 
 func (tr *BTree) InternalInsert(key uint64, value []byte) *BtreeNodeItem {
+	var out *BtreeNodeItem = nil
 	cow := tr.cow
 	offset := cow.curVPool.CurrentOffest
 	fileOffset := cow.curVPool.EofOffset
-	bItem := NewBtreeNodeItem(offset, key, 1, uint32(len(value)))
-	bItem.Key = fileOffset + offset
+	bItem := NewBtreeNodeItem(fileOffset+offset, key, 1, uint32(len(value)))
 	result := tr.ReplaceOrInsert(bItem)
 	iv := NewInternalValue(false, uint32(len(value)), key, value)
 	bv := iv.ToBytes()
 	lv := len(bv)
 	currentOffset := offset + uint64(lv)
+	if result != nil {
+		cow.mtPage.TotalRemoved = cow.mtPage.TotalRemoved + uint64(result.(*BtreeNodeItem).KeyLength) + 15
+		cow.curVPool.RemoveValues.PushBack(result)
+		out = result.(*BtreeNodeItem)
+	}
 	if currentOffset < MAXPOOLSIZE {
 		copy(cow.curVPool.MemeryTail[offset:currentOffset], bv)
 		cow.curVPool.CurrentOffest = currentOffset
@@ -610,12 +616,7 @@ func (tr *BTree) InternalInsert(key uint64, value []byte) *BtreeNodeItem {
 			}
 		}
 	}
-	if result != nil {
-		cow.mtPage.TotalRemoved = cow.mtPage.TotalRemoved + uint64(result.(*BtreeNodeItem).KeyLength) + 15
-		cow.curVPool.RemoveValues.PushBack(result)
-		return result.(*BtreeNodeItem)
-	}
-	return nil
+	return out
 }
 
 func (t *BTree) ReplaceOrInsert(item Item) Item {
@@ -855,6 +856,7 @@ func (tr BTree) GetNodeIds() []uint32 {
 
 func (tr BTree) Commit() {
 	d := tr.cow.dirtyPage
+	fmt.Println("the dirty page length is", len(d))
 	tr.cow.mtPage.RootId = tr.root.nodeId
 	tr.cow.mtPage.EmptyPageCount = uint32(len(tr.cow.emptyList))
 	tr.cow.mtPage.SetEmptyPage(tr.cow.NewPage)

@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
+	logger "until/xlog4go"
 )
 
 func Assert(condition bool, msg string, v ...interface{}) {
@@ -27,4 +29,12 @@ func Goid() int {
 		panic(fmt.Sprintf("cannot get goroutine id: %v", err))
 	}
 	return id
+}
+func Memery() {
+	for {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		logger.Info("Alloc = %vMB  TotalAlloc = %vMB  Sys = %vMB  NumGC = %vMB\n", m.Alloc/(1024*1024), m.TotalAlloc/(1024*1024), m.Sys/(1024*1024), m.NumGC)
+		time.Sleep(5 * time.Second)
+	}
 }

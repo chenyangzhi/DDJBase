@@ -5,11 +5,9 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	pb "kvprobuf"
-	"log"
 	"net"
-	"runtime"
 	"table/index"
-	"time"
+	"until"
 	logger "until/xlog4go"
 )
 
@@ -47,10 +45,7 @@ func (s *server) AscendIterate(ctx context.Context, param *pb.Slice) (*pb.Ascend
 
 func (s *server) Put(ctx context.Context, param *pb.Slice) (*pb.PutResponse, error) {
 	var p pb.PutResponse
-	t := time.Now()
 	index.Insert(param.Key, param.Value)
-	elapsed := time.Since(t)
-	logger.Info("the requeset finished in %v", elapsed)
 	p.Success = true
 	return &p, nil
 }
@@ -77,15 +72,6 @@ func (s *server) Delete(ctx context.Context, param *pb.Slice) (*pb.DeleteRespons
 	return &p, nil
 }
 
-func memery() {
-	for {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		log.Printf("Alloc = %vMB  TotalAlloc = %vMB  Sys = %vMB  NumGC = %vMB\n", m.Alloc/(1024*1024), m.TotalAlloc/(1024*1024), m.Sys/(1024*1024), m.NumGC)
-		time.Sleep(5 * time.Second)
-	}
-}
-
 func main() {
 	flag.Parse()
 	if err := logger.SetupLogWithConf(*logConf); err != nil {
@@ -98,9 +84,9 @@ func main() {
 	}
 	s := grpc.NewServer()
 	pb.RegisterDDJkvServer(s, &server{})
-	go memery()
+	go until.Memery()
 	table := index.NewTable("./data", "test", "test")
 	f := table.CreateNewTable()
-	tr = index.BuildBTreeFromPage(table.GetTablePath(), f)
+	tr = index.BuildBTreeFromPage(table.GetIndexPath(), f)
 	s.Serve(lis)
 }
