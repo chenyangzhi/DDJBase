@@ -32,7 +32,7 @@ func TestInsert() {
 	count := 0
 	for _, v := range vals {
 		ts = time.Now().UnixNano()
-		bs := "1343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567"
+		bs := "13434567890"
 		index.Insert(uint64(v), []byte(bs))
 		tmp := time.Now().UnixNano() - ts
 		if tmp > maxts {
@@ -82,11 +82,11 @@ func TestInsertAndGet() {
 	index.Curtr = index.BuildBTreeFromPage(table.GetIndexPath(), f)
 	t := time.Now()
 	for _, v := range vals {
-		bs := "1343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567890134345678901343456789013434567"
+		bs := "13434567890"
 		index.Insert(uint64(v), []byte(bs))
 	}
 	elapsed := time.Since(t)
-	logger.Info("the insert 1000000 key time elapsed ", elapsed)
+	logger.Info("the insert 10000000 key time elapsed ", elapsed)
 	for _, v := range vals {
 		val := index.Curtr.GetByKey(uint64(v))
 		if val == nil || len(val) == 0 {
@@ -94,14 +94,14 @@ func TestInsertAndGet() {
 		}
 	}
 	elapsed = time.Since(t)
-	logger.Info("the get 1000000 key time elapsed ", elapsed)
+	logger.Info("the get 10000000 key time elapsed ", elapsed)
 }
 
 func TestDelete() {
 
 }
 
-func TestIterate(){
+func TestIterate() {
 	var bItem index.BtreeNodeItem
 	table := index.NewTable("./data", "test", "test")
 	f := table.CreateNewTable()
@@ -116,7 +116,6 @@ func TestIterate(){
 	}
 }
 
-
 func main() {
 	flag.Parse()
 	if err := logger.SetupLogWithConf(*logconf); err != nil {
@@ -125,10 +124,10 @@ func main() {
 	defer logger.Close()
 	vals = GetIncreasedArray(*size)
 	t := time.Now()
-	//TestInsert()
+	TestInsert()
 	//TestGet()
 	//TestInsertAndGet()
-	TestIterate()
+	//TestIterate()
 	elapsed := time.Since(t)
 	logger.Info("the time elapsed ", elapsed)
 	for {
